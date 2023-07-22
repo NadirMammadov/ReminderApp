@@ -14,6 +14,12 @@ namespace ReminderApp.Repository
             _dbContext = dbContext;
         }
 
+        public async Task<List<Reminder>> CheckReminder(DateTime dateTime)
+        {
+            var response = await _dbContext.Reminders.Where(x=>x.DateTime <= dateTime).ToListAsync();
+            return response;
+        }
+
         public async Task<List<Reminder>> GetAllAsync(long chatId)
         {
             var response =await _dbContext.Reminders.Where(x=>x.ChatId == chatId).ToListAsync();

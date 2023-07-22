@@ -6,6 +6,7 @@ using ReminderApp.IRepository;
 using ReminderApp.Repository;
 using System;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Telegram.Bot;
 using Telegram.Bot.Args;
 using Telegram.Bot.Types;
@@ -21,6 +22,7 @@ namespace ReminderApp.Services
         private Dictionary<long, int> _userDialogSteps;
         private Reminder reminder = new Reminder();
         private ReminderService _reminderService;
+        private readonly Timer timer;
         private int year;
         private int month;
         private int day;
@@ -31,8 +33,20 @@ namespace ReminderApp.Services
             _botClient.OnUpdate += BotClient_OnMessage;
             _userDialogSteps = new Dictionary<long, int>();
             _reminderService = reminderService;
+            timer = new Timer(CheckRemindersAndSendMessages, null, 0, 60000);
         }
-
+        public async void CheckRemindersAndSendMessages(object state)
+        {
+            DateTime dateTime = DateTime.Now;
+            var reminders =  await _reminderService.CheckReminder(dateTime);
+            foreach(var reminder in reminders)
+            {
+                await SendMessage(reminder.ChatId, "<b>Salam ümüd edirəm işlərin qaydasındadır 🙂\nSənə bir xatırlatma mesajım var 🔔</b>", ParseMode.Html);
+                await SendMessage(reminder.ChatId, $"<b>Xatırlatma mesajınız:\n</b>{reminder.Text}",ParseMode.Html);
+                await SendMenuButton(reminder.ChatId);
+                await _reminderService.RemoveByCondition(reminder.ChatId, reminder.Id);
+            }
+        }
         public void StartReceiving()
         {
             _botClient.StartReceiving();
@@ -60,8 +74,8 @@ namespace ReminderApp.Services
                                         },
                                         new[]
                                         {
-                                            InlineKeyboardButton.WithCallbackData("Bot haqqinda"),
-                                            InlineKeyboardButton.WithCallbackData("Bizimle elaqe")
+                                            InlineKeyboardButton.WithCallbackData("Bot haqqında"),
+                                            InlineKeyboardButton.WithCallbackData("Bizimlə əlaqə")
                                         }
                     }
             );
@@ -147,23 +161,32 @@ namespace ReminderApp.Services
                         break;
                 }
             }
-            else if(data == "Xatirlatmalara bax"){
-                List<Reminder> reminders =  await _reminderService.GetAllAsync(chatId);
-                foreach (var reminder in reminders)
+            else if (data == "Xatirlatmalara bax")
+            {
+                List<Reminder> reminders = await _reminderService.GetAllAsync(chatId);
+                if (reminders.Count == 0)
                 {
-                    var inlineKeyboard = new InlineKeyboardMarkup(
-                   new[]
-                       {
+                    await SendMessage(chatId, $"<b>Xatırlatma mesajınınz yoxdur 📝</b>", ParseMode.Html);
+                    await SendMenuButton(chatId);
+                }
+                else
+                {
+                    foreach (var reminder in reminders)
+                    {
+                        var inlineKeyboard = new InlineKeyboardMarkup(
+                       new[]
+                           {
                                             new[]
                                             {
-                                                InlineKeyboardButton.WithCallbackData("Düzəlt ✏️ ",$"remove_{reminder.Id.ToString()}"),
                                                 InlineKeyboardButton.WithCallbackData("Sil 🗑️",$"remove_{reminder.Id.ToString()}")
                                             }
-                       });
-                    await SendMessage(chatId, $"<b>Xatırlatma mesajı 📝</b>\n<i>{reminder.Text}</i>\n<b>Xatırlatma tarixi  ⏰</b>\n<i>{reminder.DateTime.ToString("dd/MM/yyyy")} </i>", ParseMode.Html,inlineKeyboard);
+                           });
+                        await SendMessage(chatId, $"<b>Xatırlatma mesajı 📝</b>\n<i>{reminder.Text}</i>\n<b>Xatırlatma tarixi  ⏰</b>\n<i>{reminder.DateTime.ToString("dd/MM/yyyy HH:mm")} </i>", ParseMode.Html, inlineKeyboard);
+                    }
                 }
+
             }
-            else if(data.StartsWith("remove_"))
+            else if (data.StartsWith("remove_"))
             {
                 int reminderId = int.Parse(e.Data.Substring(7));
                 await _reminderService.RemoveByCondition(chatId, reminderId);
@@ -173,17 +196,33 @@ namespace ReminderApp.Services
             else if (data.StartsWith("year_"))
             {
                 await ReminderCreateProcessTwo(chatId, data.Substring(5));
-                
+
             }
             else if (data.StartsWith("month_"))
             {
                 await ReminderCreateProcessThree(chatId, data.Substring(6));
 
             }
-            else if(data.StartsWith("day_"))
+            else if (data.StartsWith("day_"))
             {
                 await ReminderCreateProcessFour(chatId, data.Substring(4));
             }
+            else if(data == "Bot haqqında")
+            {
+                await SendMessage(chatId, "<b>ReminderNZbot</b> sizi salamlayır. \n Məndən istifadə ederək xatırlatmalar yarada bilərsiz :)",ParseMode.Html);
+            }
+            else if (data == "Bizimlə əlaqə")
+            {
+                await SendMessage(chatId, "<b>ReminderNZbot</b> sizi salamlayır\nBizimlə əlaqə: 0708538060\n<b>Developer by Nadir</b>", ParseMode.Html);
+            }
+            else if (data == "Ləğv et 🚫")
+            {
+                ProcessCancel(chatId);
+                await SendMessage(chatId, $"<b>Leğv edildi.</b>", ParseMode.Html);
+                await SendMenuButton(chatId);
+            }
+                
+                
             else
             {
                 await SendMessage(chatId, $"-----");
@@ -367,7 +406,6 @@ namespace ReminderApp.Services
         }
         private async Task ReminderCreateProcessFour(long chatId, string day)
         {
-            
             try
             {
                 this.day = int.Parse(day);
@@ -381,17 +419,27 @@ namespace ReminderApp.Services
                     await SendMessage(chatId, $"<b>⚠️ Xatırlatma tarixi düzgün deyil ele bir tarix mövcud deyil.</b> ⚠️", ParseMode.Html);
                     await ReminderCreateProcessThree(chatId, this.month.ToString());
                 }
-                var inlineKeyboard = new InlineKeyboardMarkup(
-                    new[]
-                        {
-                       new[]
-                       {
-                           InlineKeyboardButton.WithCallbackData("Ləğv et 🚫")
-                       },
-                        }
-                );
-                await SendMessage(chatId, $"<b>Xatırlatma saatını yazın</b> 🕓\n <b>⚠️ Diqqet saat <i>00:00</i> formatında yazılmalıdır. ⚠️</b>", ParseMode.Html, inlineKeyboard);
-                UpdateUserDialogStep(chatId, 5);
+                if( int.Parse(day) >= DateTime.Now.Day)
+                {
+                    var inlineKeyboard = new InlineKeyboardMarkup(
+                            new[]
+                                {
+                               new[]
+                               {
+                                   InlineKeyboardButton.WithCallbackData("Ləğv et 🚫")
+                               },
+                                }
+                    );
+                    await SendMessage(chatId, $"<b>Xatırlatma saatını yazın</b> 🕓\n <b>⚠️ Diqqet saat <i>00:00</i> formatında yazılmalıdır. ⚠️</b>", ParseMode.Html, inlineKeyboard);
+                    UpdateUserDialogStep(chatId, 5);
+                }
+                else
+                {
+                    await SendMessage(chatId, $"<b>⚠️ Zamanda işinlanma edə bilmirik :(\nKeçmiş bir tarixi seçdiniz yeniden seçin</b> ⚠️", ParseMode.Html);
+                    await ReminderCreateProcessThree(chatId, this.month.ToString());
+                    
+                }
+                
             }
             catch (Exception)
             {
@@ -406,12 +454,21 @@ namespace ReminderApp.Services
             DateTime time;
             if (DateTime.TryParseExact(hour, format, CultureInfo.InvariantCulture, DateTimeStyles.None, out time))
             {
-                reminder.DateTime = new DateTime(this.year, this.month, this.day, time.Hour,time.Minute,time.Second);
-                reminder.ChatId = chatId;
-                await _reminderService.CreateReminder(reminder);
-                await SendMessage(chatId, $"<b>Xatırlatmanız qeydə alındı. ✅</b> \n{reminder.DateTime.ToString("dd/MM/yyyy")} tarixində sizə xatırladacayıq 📅\nİşlərnizdə uğurlar arzu edirik 👍", ParseMode.Html);
-                await SendMenuButton(chatId);
-                ResetUserDialogStep(chatId);
+                if(new DateTime(this.year, this.month, this.day, time.Hour, time.Minute, time.Second)>DateTime.Now) {
+                    reminder.DateTime = new DateTime(this.year, this.month, this.day, time.Hour, time.Minute, time.Second);
+                    reminder.ChatId = chatId;
+                    reminder.Id = 0;
+                    await _reminderService.CreateReminder(reminder);
+                    await SendMessage(chatId, $"<b>Xatırlatmanız qeydə alındı. ✅</b> \n{reminder.DateTime.ToString("dd/MM/yyyy HH:mm")} tarixində sizə xatırladacayıq 📅\nİşlərnizdə uğurlar arzu edirik 👍", ParseMode.Html);
+                    await SendMenuButton(chatId);
+                    ResetUserDialogStep(chatId);
+                }
+                else
+                {
+                    await SendMessage(chatId, $"<b>⚠️ Zamanda işinlanma edə bilmirik :(\nKeçmiş bir saatı seçdiniz yeniden seçin</b> ⚠️", ParseMode.Html);
+                    await ReminderCreateProcessFour(chatId, day.ToString());
+                }
+                
             }
             else
             {

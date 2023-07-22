@@ -13,6 +13,10 @@ namespace ReminderApp.Services
             _reminderRepository = reminderRepository;
             _repository = repository;
         }
+        public async Task<List<Reminder>> CheckReminder(DateTime dateTime)
+        {
+            return await _reminderRepository.CheckReminder(dateTime);
+        }
         public async Task<List<Reminder>> GetAllAsync(long chatId)
         {
             return await _reminderRepository.GetAllAsync(chatId);
